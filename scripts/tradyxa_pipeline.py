@@ -481,8 +481,311 @@ def compute_verdict(metrics: Dict[str,Any], features: pd.DataFrame,
             "params": {"weights": {}}
         }
 
+def generate_volume_profile_from_ohlcv(
+    df_ohlcv: pd.DataFrame,
+    price_buckets: int = 20,
+    lookback_days: int = 60
+) -> List[Dict]:
+    """Generate realistic Volume Profile from historical OHLCV data"""
+    if len(df_ohlcv) < lookback_days:
+        lookback_days = len(df_ohlcv)
+    
+    df = df_ohlcv.tail(lookback_days).copy()
+    min_price = df['Low'].min()
+    max_price = df['High'].max()
+    
+    if min_price >= max_price:
+        return []
+    
+    price_levels = np.linspace(min_price, max_price, price_buckets)
+    volume_at_level = {level: 0.0 for level in price_levels}
+    buy_volume_at_level = {level: 0.0 for level in price_levels}
+    sell_volume_at_level = {level: 0.0 for level in price_levels}
+    
+    for idx, row in df.iterrows():
+        high = row['High']
+        low = row['Low']
+        close = row['Close']
+        volume = row['Volume']
+        
+        candle_levels = [p for p in price_levels if low <= p <= high]
+        if len(candle_levels) == 0:
+            continue
+        
+        vol_per_level = volume / len(candle_levels)
+        
+        for level in candle_levels:
+            volume_at_level[level] += vol_per_level
+            
+            # Buy/sell distribution based on candle direction
+            if close > row['Open']:
+                distance_from_top = (high - level) / (high - low) if high > low else 0
+                buy_ratio = 0.7 - distance_from_top * 0.2
+            else:
+                distance_from_bottom = (level - low) / (high - low) if high > low else 0.5
+                buy_ratio = 0.3 + distance_from_bottom * 0.2
+            
+            buy_vol = vol_per_level * buy_ratio
+            sell_vol = vol_per_level * (1 - buy_ratio)
+            buy_volume_at_level[level] += buy_vol
+            sell_volume_at_level[level] += sell_vol
+    
+    result = []
+    for level in sorted(price_levels):
+        result.append({
+            'price': round(level, 2),
+            'volume': int(volume_at_level[level]),
+            'buyVolume': int(buy_volume_at_level[level]),
+            'sellVolume': int(sell_volume_at_level[level])
+        })
+    return result
+
+def generate_candles_from_ohlcv(
+    df_ohlcv: pd.DataFrame,
+    max_candles: int = 60
+) -> List[Dict]:
+    """Generate candles with last N trading days"""
+    df = df_ohlcv.tail(max_candles).copy()
+    candles = []
+    
+    for date, row in df.iterrows():
+        candles.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'open': round(float(row['Open']), 2),
+            'high': round(float(row['High']), 2),
+            'low': round(float(row['Low']), 2),
+            'close': round(float(row['Close']), 2),
+            'volume': int(row['Volume'])
+        })
+    
+    return candles
+
+def generate_bollinger_bands(
+    df_ohlcv: pd.DataFrame,
+    window: int = 20,
+    num_std: float = 2.0,
+    max_points: int = 60
+) -> List[Dict]:
+    """Generate Bollinger Bands from OHLCV data"""
+    df = df_ohlcv.tail(max_points + window).copy()
+    
+    # Calculate SMA and std dev
+    sma = df['Close'].rolling(window=window).mean()
+    std = df['Close'].rolling(window=window).std()
+    
+    upper_band = sma + (std * num_std)
+    lower_band = sma - (std * num_std)
+    
+    # Return only the last max_points
+    result = []
+    for i in range(len(df) - max_points, len(df)):
+        date = df.index[i]
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'close': round(float(df['Close'].iloc[i]), 2),
+            'sma': round(float(sma.iloc[i]), 2) if pd.notna(sma.iloc[i]) else None,
+            'upper': round(float(upper_band.iloc[i]), 2) if pd.notna(upper_band.iloc[i]) else None,
+            'lower': round(float(lower_band.iloc[i]), 2) if pd.notna(lower_band.iloc[i]) else None
+        })
+    
+    return result
+
+def generate_orderbook_from_ohlcv(
+    df_ohlcv: pd.DataFrame,
+    current_price: float,
+    depth_levels: int = 10
+) -> List[Dict]:
+    """Generate synthetic orderbook around current price"""
+    # Use price range from recent volatility
+    recent_volatility = df_ohlcv['Close'].pct_change().tail(20).std()
+    price_step = current_price * max(recent_volatility, 0.001)  # At least 0.1% step
+    
+    orderbook = []
+    
+    # Bids (below current price)
+    for i in range(1, depth_levels + 1):
+        bid_price = current_price - (i * price_step)
+        qty = int(5000 / (1 + 0.3 * i))  # Decrease quantity as we go deeper
+        orderbook.append({
+            'price': round(bid_price, 2),
+            'bidQty': qty,
+            'askQty': 0
+        })
+    
+    # Asks (above current price)
+    for i in range(1, depth_levels + 1):
+        ask_price = current_price + (i * price_step)
+        qty = int(5000 / (1 + 0.3 * i))
+        orderbook.append({
+            'price': round(ask_price, 2),
+            'bidQty': 0,
+            'askQty': qty
+        })
+    
+    # Sort by price
+    orderbook.sort(key=lambda x: x['price'])
+    return orderbook
+
+def generate_rolling_averages(
+    df_ohlcv: pd.DataFrame,
+    max_points: int = 60
+) -> List[Dict]:
+    """Generate rolling averages (MA5, MA20, MA50)"""
+    df = df_ohlcv.tail(max_points + 50).copy()
+    
+    # Calculate MAs
+    ma5 = df['Close'].rolling(window=5).mean()
+    ma20 = df['Close'].rolling(window=20).mean()
+    ma50 = df['Close'].rolling(window=50).mean()
+    
+    # Return last max_points
+    result = []
+    for i in range(len(df) - max_points, len(df)):
+        date = df.index[i]
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'close': round(float(df['Close'].iloc[i]), 2),
+            'ma5': round(float(ma5.iloc[i]), 2) if pd.notna(ma5.iloc[i]) else None,
+            'ma20': round(float(ma20.iloc[i]), 2) if pd.notna(ma20.iloc[i]) else None,
+            'ma50': round(float(ma50.iloc[i]), 2) if pd.notna(ma50.iloc[i]) else None
+        })
+    
+    return result
+
+def generate_absorption_flow(
+    df_ohlcv: pd.DataFrame,
+    max_points: int = 60
+) -> List[Dict]:
+    """Generate buy/sell flow absorption from volume and price movement"""
+    df = df_ohlcv.tail(max_points).copy()
+    
+    result = []
+    for idx, (date, row) in enumerate(df.iterrows()):
+        # Calculate flow based on close vs open
+        price_move = row['Close'] - row['Open']
+        total_volume = row['Volume']
+        price_range = row['High'] - row['Low']
+        
+        # Avoid division by zero
+        if price_range == 0:
+            price_range = 0.01
+        
+        # More volume in direction of price move = more absorption
+        if price_move > 0:  # Bullish
+            momentum = abs(price_move) / price_range
+            buy_volume = total_volume * (0.6 + 0.2 * min(momentum, 1))
+            sell_volume = total_volume - buy_volume
+        else:  # Bearish
+            momentum = abs(price_move) / price_range
+            sell_volume = total_volume * (0.6 + 0.2 * min(momentum, 1))
+            buy_volume = total_volume - sell_volume
+        
+        result.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'buyFlow': int(max(0, buy_volume)),
+            'sellFlow': int(max(0, sell_volume))
+        })
+    
+    return result
+
+def generate_heatmap(
+    df_ohlcv: pd.DataFrame,
+    hours: int = 9,
+    days: int = 5
+) -> List[Dict]:
+    """Generate intraday heatmap (volume intensity by hour/day)"""
+    # Since daily OHLCV doesn't have intraday data, simulate based on patterns
+    # Typical market pattern: starts low, mid-day peak, ends lower
+    heatmap = []
+    
+    # Day of week: 0=Mon, 1=Tue, ..., 4=Fri
+    # Hour pattern: 9am-5pm (9 hours)
+    hour_pattern = [0.3, 0.5, 0.7, 0.8, 1.0, 0.9, 0.8, 0.6, 0.4]  # Peak at 1-2pm
+    day_pattern = [0.7, 0.75, 0.8, 0.85, 1.0]  # Friday peak
+    
+    for day in range(days):
+        for hour in range(hours):
+            # Combine patterns
+            intensity = hour_pattern[hour] * day_pattern[day]
+            # Add some randomness
+            rnd = 0.8 + np.random.random() * 0.4
+            intensity *= rnd
+            
+            heatmap.append({
+                'hour': 9 + hour,
+                'dayOfWeek': day,
+                'value': round(intensity * 100),
+                'count': int(5000 + intensity * 5000)
+            })
+    
+    return heatmap
+
+def generate_histogram(
+    df_ohlcv: pd.DataFrame,
+    num_bins: int = 8
+) -> List[Dict]:
+    """Generate returns distribution histogram"""
+    # Calculate daily returns
+    returns = df_ohlcv['Close'].pct_change().dropna() * 100  # Convert to percentage
+    
+    # Define bins
+    min_ret = returns.min()
+    max_ret = returns.max()
+    bins = np.linspace(min_ret, max_ret, num_bins + 1)
+    
+    # Create histogram
+    hist, bin_edges = np.histogram(returns, bins=bins)
+    
+    result = []
+    for i in range(len(hist)):
+        bin_start = bin_edges[i]
+        bin_end = bin_edges[i + 1]
+        bin_mid = (bin_start + bin_end) / 2
+        
+        result.append({
+            'bin': round(bin_mid, 2),
+            'count': int(hist[i]),
+            'percentage': round(hist[i] / len(returns) * 100, 1)
+        })
+    
+    return result
+
+def generate_slippage_samples(
+    df_ohlcv: pd.DataFrame,
+    num_samples: int = 50
+) -> List[Dict]:
+    """Generate slippage samples from volume and volatility"""
+    df = df_ohlcv.tail(100).copy()
+    
+    samples = []
+    for i in range(num_samples):
+        # Pick random day from last 100
+        idx = np.random.randint(0, len(df))
+        row = df.iloc[idx]
+        date = df.index[idx]
+        
+        # Volume determines slippage
+        avg_vol = df['Volume'].mean()
+        vol_ratio = row['Volume'] / avg_vol
+        
+        # Higher volume = lower slippage
+        base_slippage = 0.1  # 0.1%
+        slippage = base_slippage / (vol_ratio + 0.5) + np.random.normal(0, 0.02)
+        slippage = max(0, slippage)  # No negative slippage
+        
+        samples.append({
+            'timestamp': date.strftime('%Y-%m-%d'),
+            'expected': round(row['Close'], 2),
+            'actual': round(row['Close'] * (1 + slippage/100), 2),
+            'slippage': round(slippage, 3),
+            'volume': int(row['Volume'])
+        })
+    
+    return samples
+
 def save_ticker_json(ticker: str, meta: Dict[str,Any], 
-                    metrics: Dict[str,Any], features_head: pd.DataFrame):
+                    metrics: Dict[str,Any], features_head: pd.DataFrame,
+                    df_full_ohlcv: Optional[pd.DataFrame] = None):
     """Write ticker JSON"""
     safe_mkdir(DATA_DIR)
     features_count = min(500, len(features_head))
@@ -506,10 +809,45 @@ def save_ticker_json(ticker: str, meta: Dict[str,Any],
         } for ts, row in fh.iterrows()
     }
     
+    # Generate volume profile from real OHLCV data
+    volume_profile = []
+    candles = []
+    bollinger_bands = []
+    orderbook = []
+    rolling_averages = []
+    absorption_flow = []
+    heatmap = []
+    histogram = []
+    slippage_samples = []
+    current_price = float(features_head.iloc[-1]['Close'])
+    
+    if df_full_ohlcv is not None and len(df_full_ohlcv) > 0:
+        try:
+            volume_profile = generate_volume_profile_from_ohlcv(df_full_ohlcv, price_buckets=20, lookback_days=60)
+            candles = generate_candles_from_ohlcv(df_full_ohlcv, max_candles=60)
+            bollinger_bands = generate_bollinger_bands(df_full_ohlcv, window=20, num_std=2.0, max_points=60)
+            orderbook = generate_orderbook_from_ohlcv(df_full_ohlcv, current_price, depth_levels=10)
+            rolling_averages = generate_rolling_averages(df_full_ohlcv, max_points=60)
+            absorption_flow = generate_absorption_flow(df_full_ohlcv, max_points=60)
+            heatmap = generate_heatmap(df_full_ohlcv)
+            histogram = generate_histogram(df_full_ohlcv)
+            slippage_samples = generate_slippage_samples(df_full_ohlcv)
+        except Exception as e:
+            log.warning(f"Failed to generate market data for {ticker}: {e}")
+    
     json_obj = {
         "meta": meta,
         "metrics": metrics,
-        "features_head": features_dict
+        "features_head": features_dict,
+        "volumeProfile": volume_profile,
+        "candles": candles,
+        "bollingerBands": bollinger_bands,
+        "orderbook": orderbook,
+        "rollingAverages": rolling_averages,
+        "absorptionFlow": absorption_flow,
+        "heatmap": heatmap,
+        "histogram": histogram,
+        "slippageSamples": slippage_samples
     }
     
     path = os.path.join(DATA_DIR, f"{ticker}.json")
@@ -580,7 +918,7 @@ def run_pipeline_for_ticker(ticker: str, use_yf: bool = True):
     }
     
     # Save
-    save_ticker_json(ticker, meta, metrics, df_features)
+    save_ticker_json(ticker, meta, metrics, df_features, df_full_ohlcv=df)
     write_slippage_files(ticker, slippage_map, monte_map)
 
 def batch_run(tickers_file: str, max_workers: int = 4):

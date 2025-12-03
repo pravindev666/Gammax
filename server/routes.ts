@@ -145,8 +145,6 @@ export async function registerRoutes(
       const cleanTicker = ticker.toUpperCase();
 
       // Try to read real data first
-      // Note: currently full data is also in the same JSON or generated
-      // For now, we'll read the same JSON file as it contains full analysis
       const filePath = `public/data/ticker/${cleanTicker}.json`;
       let data = await readJsonFile(filePath);
 
@@ -154,12 +152,27 @@ export async function registerRoutes(
         console.log(`No full data file found for ${cleanTicker}, using synthetic`);
         data = generateFullSyntheticData(cleanTicker);
       } else {
-        // If the file exists, we might need to augment it with "full" data structure 
-        // if the JSON structure differs from what the frontend expects for "full".
-        // However, based on tradyxa_pipeline.py, the JSON seems comprehensive.
-        // Let's ensure it has the fields the frontend expects, or fallback to synthetic for missing fields.
+        // Real file exists - use it but augment missing fields with synthetic
         const synthetic = generateFullSyntheticData(cleanTicker);
-        data = { ...synthetic, ...data }; // Merge real data over synthetic structure to ensure all fields exist
+        
+        // Keep real data fields, only fill in missing ones from synthetic
+        data = {
+          meta: data.meta || synthetic.meta,
+          metrics: data.metrics || synthetic.metrics,
+          features_head: data.features_head || synthetic.features_head,
+          // Real market microstructure data
+          volumeProfile: data.volumeProfile && data.volumeProfile.length > 0 ? data.volumeProfile : synthetic.volumeProfile,
+          candles: data.candles && data.candles.length > 0 ? data.candles : synthetic.candles,
+          bollingerBands: data.bollingerBands && data.bollingerBands.length > 0 ? data.bollingerBands : synthetic.bollingerBands,
+          orderbook: data.orderbook && data.orderbook.length > 0 ? data.orderbook : synthetic.orderbook,
+          rollingAverages: data.rollingAverages && data.rollingAverages.length > 0 ? data.rollingAverages : synthetic.rollingAverages,
+          absorptionFlow: data.absorptionFlow && data.absorptionFlow.length > 0 ? data.absorptionFlow : synthetic.absorptionFlow,
+          heatmap: data.heatmap && data.heatmap.length > 0 ? data.heatmap : synthetic.heatmap,
+          histogram: data.histogram && data.histogram.length > 0 ? data.histogram : synthetic.histogram,
+          slippageSamples: data.slippageSamples && data.slippageSamples.length > 0 ? data.slippageSamples : synthetic.slippageSamples,
+          // Keep synthetic for timeline (no market data source)
+          timelineEvents: synthetic.timelineEvents
+        };
       }
 
       res.json(data);
