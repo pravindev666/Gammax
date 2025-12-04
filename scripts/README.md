@@ -2,6 +2,28 @@
 
 This document provides a detailed explanation of each Python script in the `scripts/` directory.
 
+## 🧠 ML Models & Data Dependencies
+
+### Quick Reference
+
+**Which Scripts Train Models?**  
+✅ `train_regime_classifier.py` - Trains regime classification model (Weekly)  
+✅ `train_slippage_quantile.py` - Trains slippage forecasting models (Weekly)  
+❌ All other scripts do NOT train models
+
+**Which Scripts Send Data to Dashboard?**  
+✅ `tradyxa_pipeline.py` - Generates all dashboard tile data (Daily)  
+✅ `apply_models.py` - Adds ML predictions to dashboard data (Daily)  
+✅ `fetch_spot_prices.py` - Updates live spot prices only (Every 2 hours)  
+❌ Training scripts do NOT send to dashboard (use `[skip ci]`)
+
+**Dashboard Tile Dependencies:**
+- **Tiles 1, 2, 4-12** - Use CSV-derived data (no ML models)
+- **Tile 3 (Slippage)** - Enhanced with Q50/Q90 slippage model predictions
+- **Tile 13 (Verdict)** - Enhanced with regime classifier + slippage predictions
+
+📖 **See comprehensive documentation:** [../MODEL_TRAINING_AND_DATA_DEPENDENCIES.md](../MODEL_TRAINING_AND_DATA_DEPENDENCIES.md)
+
 ## Data Pipeline Flow
 
 ```mermaid

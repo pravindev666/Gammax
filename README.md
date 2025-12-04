@@ -20,12 +20,14 @@ A production-grade financial analytics dashboard for Indian stock traders featur
 13. **Verdict Tile** - Aggregated AI signal (BULLISH/BEARISH/NEUTRAL) with confidence
 
 ### Smart Insights
-✨ **Dynamic insights on every tile** that change based on real market data:
+✨ **Dynamic insights on every tile** that change based on real market data for each stock:
 - Volume Profile: "📉 People sold LOWER prices - Market moved UP since then"
 - Orderbook: "🟢 More buyers than sellers - Might go UP!"
 - Bollinger Bands: "⬆ Price is higher - Might keep going up"
 - Absorption Flow: "🔴 More people SELLING - Price might go DOWN"
 - And 8+ more context-aware signals
+
+**Note:** These insights are **NOT static** - they change for every stock based on that stock's actual data! Switch from NIFTY to TATASTEEL and see different insights. (No ML models used, just smart threshold-based calculations from `chartInsights.ts`)
 
 ### Investment Guidance
 💰 **"Invest THIS MUCH" display** in left sidebar:
@@ -77,6 +79,35 @@ A production-grade financial analytics dashboard for Indian stock traders featur
   - Random Forest for execution regime
   - Quantile Regression for slippage prediction
 - Real market microstructure data generation
+
+## 🧠 ML Model Training & Data Dependencies
+
+### Quick Summary
+
+**4 Stages of Data Flow:**
+1. **Initial Historical Fetch** (One-time) - Fetch 5 years OHLCV → Store in CSVs
+2. **Daily Updates** (Weekdays) - Incremental OHLCV + Generate all tiles + Apply ML models → Deploy to dashboard
+3. **Live Spot Prices** (Every 2 hours) - Fetch current prices only → Quick deploy
+4. **Weekly Training** (Sundays) - Train 3 ML models → Save models (NO deploy)
+
+**Which Stage Trains Models?**  
+✅ **ONLY Stage 4 (Weekly Training)** trains the ML models  
+❌ Stage 1, 2, 3 do NOT train models
+
+**Which Stage Sends Data to Dashboard?**  
+✅ **Stage 2 (Daily Updates)** - Full dashboard data with ML predictions  
+✅ **Stage 3 (Live Prices)** - Spot prices + VIX only  
+❌ Stage 1, 4 do NOT send to dashboard
+
+**Which Tiles Depend on ML Models?**  
+Only **2 out of 13 tiles** use ML predictions:
+- **Tile 3:** Slippage Expectation (uses Q50/Q90 slippage models)
+- **Tile 13:** Verdict (uses Regime Classifier + Slippage models)
+
+All other tiles (1, 2, 4-12) use **CSV-derived data** without ML enhancement.
+
+📖 **See detailed documentation:** [MODEL_TRAINING_AND_DATA_DEPENDENCIES.md](MODEL_TRAINING_AND_DATA_DEPENDENCIES.md)  
+📖 **Data fetching architecture:** [DATA_FETCHING_ARCHITECTURE.md](DATA_FETCHING_ARCHITECTURE.md)
 
 ## 🏗️ System Architecture
 
