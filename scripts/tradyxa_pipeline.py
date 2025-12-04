@@ -67,11 +67,20 @@ def _json_default(o):
     if isinstance(o, (np.integer,)):
         return int(o)
     if isinstance(o, (np.floating,)):
-        return float(o)
+        val = float(o)
+        # Replace NaN and Inf with 0
+        if not np.isfinite(val):
+            return 0.0
+        return val
     if isinstance(o, (np.ndarray,)):
         return o.tolist()
     if isinstance(o, pd.Timestamp):
         return o.isoformat()
+    if isinstance(o, float):
+        # Handle regular Python floats too
+        if not np.isfinite(o):
+            return 0.0
+        return o
     raise TypeError(f"Type not serializable: {type(o)}")
 
 def safe_int(value, default=0):
@@ -80,6 +89,19 @@ def safe_int(value, default=0):
         if pd.isna(value) or value is None:
             return default
         return int(value)
+    except (ValueError, TypeError):
+        return default
+
+def safe_float(value, default=0.0):
+    """Safely convert to float, handling NaN and None"""
+    try:
+        if pd.isna(value) or value is None:
+            return default
+        result = float(value)
+        # Check if result is NaN or inf
+        if not np.isfinite(result):
+            return default
+        return result
     except (ValueError, TypeError):
         return default
 
@@ -805,18 +827,18 @@ def save_ticker_json(ticker: str, meta: Dict[str,Any],
     
     features_dict = {
         ts.isoformat(): {
-            "Open": float(row["Open"]), 
-            "High": float(row["High"]), 
-            "Low": float(row["Low"]),
-            "Close": float(row["Close"]), 
+            "Open": safe_float(row["Open"]), 
+            "High": safe_float(row["High"]), 
+            "Low": safe_float(row["Low"]),
+            "Close": safe_float(row["Close"]), 
             "Volume": safe_int(row["Volume"]),
-            "amihud": float(row.get("amihud", 0.0)),
-            "lambda": float(row.get("lambda", 0.0)),
-            "mfc": float(row.get("mfc", 0.0)),
-            "vol_zscore": float(row.get("vol_zscore", 0.0)),
-            "volatility": float(row.get("volatility", 0.0)),
-            "ret": float(row.get("ret", 0.0)),
-            "hlc_ratio": float(row.get("hlc_ratio", 0.0)),
+            "amihud": safe_float(row.get("amihud", 0.0)),
+            "lambda": safe_float(row.get("lambda", 0.0)),
+            "mfc": safe_float(row.get("mfc", 0.0)),
+            "vol_zscore": safe_float(row.get("vol_zscore", 0.0)),
+            "volatility": safe_float(row.get("volatility", 0.0)),
+            "ret": safe_float(row.get("ret", 0.0)),
+            "hlc_ratio": safe_float(row.get("hlc_ratio", 0.0)),
             "tod": float(row.get("tod", 0.0))
         } for ts, row in fh.iterrows()
     }

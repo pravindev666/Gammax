@@ -2,6 +2,45 @@
 
 A production-grade financial analytics dashboard for Indian stock traders featuring **12 analytical tiles + 1 verdict tile** with **real market microstructure data**, AI-powered insights, and investment guidance. Built with React/TypeScript frontend and Python/Node.js backend.
 
+---
+
+## 🆕 Recent Updates (v1.1.3 - Dec 2024)
+
+### **Code Quality Improvements**
+- ✅ Fixed all Python deprecation warnings (pandas, datetime)
+- ✅ Fixed NaN to integer conversion errors
+- ✅ Added safe type conversion helpers (`safe_int`, `safe_float`)
+- ✅ Improved JSON validation (no more NaN/Infinity in output)
+- ✅ Reduced logging verbosity (clean progress bars)
+- ✅ Added rate limiting protection for yfinance API
+
+### **Data Processing**
+- ✅ Automated audit & repair tool for 503 ticker JSONs
+- ✅ 99.2% success rate (502/503 stocks valid)
+- ✅ Incremental data fetching (caches previous data)
+- ✅ Only downloads NEW data daily (saves time & bandwidth)
+
+### **GitHub Actions Automation**
+- ✅ **Daily spot price updates** (every 2h during market hours)
+- ✅ **Weekly full pipeline** (503 stocks + ML models)  
+- ✅ Auto cache cleanup (deletes old workflow runs)
+- ✅ Zero-cost operation (uses 16% of free tier)
+
+### **Performance**
+- ✅ Vite build with automatic cache busting (hash-based filenames)
+- ✅ Cloudflare Pages deployment (2-3 min builds)
+- ✅ Optimized for 503 stocks without performance issues
+
+### **Documentation**
+- 📖 `GITHUB_ACTIONS_ESTIMATE.md` - Complete cost & workflow breakdown
+- 📖 `CHANGELOG_v1.1.md` - Detailed changelog with before/after examples
+- 📖 `BUGFIX_v1.1.2.md` - NaN error fix documentation
+- 📖 `QUICKFIX_v1.1.3.md` - pandas warnings fix
+
+**See:** [GITHUB_ACTIONS_ESTIMATE.md](GITHUB_ACTIONS_ESTIMATE.md) for full automation details.
+
+---
+
 ## 🎯 Key Features
 
 ### Dashboard Tiles (12 Analysis + 1 Verdict)
