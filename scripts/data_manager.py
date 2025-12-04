@@ -3,9 +3,13 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 import logging
+import warnings
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Suppress yfinance FutureWarning (not our code)
+warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
+
+# Configure logging - reduce verbosity
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATA_DIR = os.path.join("public", "data", "raw")
@@ -83,8 +87,11 @@ def fetch_and_update_data(ticker: str, period: str = "5y", interval: str = "1d")
                 
                 # Combine and deduplicate
                 combined_df = pd.concat([existing_df, new_df])
+                # Remove duplicates and reset index to ensure uniqueness
                 combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
-                combined_df.sort_index(inplace=True)
+                combined_df = combined_df.sort_index()
+                # Reset and set index to ensure clean DatetimeIndex
+                combined_df.index = pd.DatetimeIndex(combined_df.index)
                 save_data(ticker, combined_df)
                 return combined_df
         except Exception as e:

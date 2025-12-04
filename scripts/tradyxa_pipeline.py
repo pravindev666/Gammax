@@ -13,7 +13,7 @@ import math
 import random
 import logging
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 
 import numpy as np
@@ -30,9 +30,10 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     import data_manager
 
+# Configure logging - reduce verbosity
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
+    level=logging.WARNING,  # Only show warnings and errors
+    format="%(levelname)s: %(message)s"
 )
 log = logging.getLogger("tradyxa_pipeline")
 
@@ -50,7 +51,7 @@ INDEX_TICKER_MAP = {
 }
 
 def now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat() + "Z"
 
 def safe_mkdir(path: str):
     if not os.path.exists(path):
@@ -73,6 +74,15 @@ def _json_default(o):
         return o.isoformat()
     raise TypeError(f"Type not serializable: {type(o)}")
 
+def safe_int(value, default=0):
+    """Safely convert to int, handling NaN and None"""
+    try:
+        if pd.isna(value) or value is None:
+            return default
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
 def get_ticker_symbol(ticker: str) -> str:
     """Map friendly name to yfinance symbol"""
     if ticker in INDEX_TICKER_MAP:
@@ -85,14 +95,16 @@ def fetch_ohlcv(ticker: str) -> Optional[pd.DataFrame]:
     """Fetch OHLCV using data_manager (CSV cache + incremental update)"""
     yft = get_ticker_symbol(ticker)
     try:
+        # Add small delay to avoid yfinance rate limits (1-2 seconds)
+        time.sleep(random.uniform(0.5, 1.5))
+        
         # Use data_manager to fetch/update
         df = data_manager.fetch_and_update_data(yft)
         if df.empty:
-            log.warning(f"No data found for {ticker} ({yft})")
             return None
         return df
     except Exception as e:
-        log.error(f"Error fetching data for {ticker}: {e}")
+        log.error(f"Failed: {ticker} - {str(e)[:50]}")
         return None
 
 def synthetic_ohlcv(ticker: str, minutes: int = 78*30, 
@@ -167,7 +179,7 @@ def rolling_lambda(df_ohlcv: pd.DataFrame, window: int = 20) -> pd.Series:
 def compute_mfc(df_ohlcv: pd.DataFrame, window: int = 20) -> pd.Series:
     """Market Friction Coefficient"""
     dp = df_ohlcv["Close"].diff().abs().fillna(0.0)
-    vol = df_ohlcv["Volume"].replace(0, np.nan).fillna(method='ffill').fillna(1.0)
+    vol = df_ohlcv["Volume"].replace(0, np.nan).ffill().fillna(1.0)
     ratio = dp / vol
     mfc = ratio.rolling(window=window, min_periods=1).mean() * math.sqrt(window)
     return mfc.fillna(0.0)
@@ -555,7 +567,7 @@ def generate_candles_from_ohlcv(
             'high': round(float(row['High']), 2),
             'low': round(float(row['Low']), 2),
             'close': round(float(row['Close']), 2),
-            'volume': int(row['Volume'])
+            'volume': safe_int(row['Volume'])
         })
     
     return candles
@@ -597,7 +609,7 @@ def generate_orderbook_from_ohlcv(
 ) -> List[Dict]:
     """Generate synthetic orderbook around current price"""
     # Use price range from recent volatility
-    recent_volatility = df_ohlcv['Close'].pct_change().tail(20).std()
+    recent_volatility = df_ohlcv['Close'].pct_change(fill_method=None).tail(20).std()
     price_step = current_price * max(recent_volatility, 0.001)  # At least 0.1% step
     
     orderbook = []
@@ -682,8 +694,8 @@ def generate_absorption_flow(
         
         result.append({
             'date': date.strftime('%Y-%m-%d'),
-            'buyFlow': int(max(0, buy_volume)),
-            'sellFlow': int(max(0, sell_volume))
+            'buyFlow': safe_int(max(0, buy_volume)),
+            'sellFlow': safe_int(max(0, sell_volume))
         })
     
     return result
@@ -715,7 +727,7 @@ def generate_heatmap(
                 'hour': 9 + hour,
                 'dayOfWeek': day,
                 'value': round(intensity * 100),
-                'count': int(5000 + intensity * 5000)
+                'count': safe_int(5000 + intensity * 5000)
             })
     
     return heatmap
@@ -726,7 +738,7 @@ def generate_histogram(
 ) -> List[Dict]:
     """Generate returns distribution histogram"""
     # Calculate daily returns
-    returns = df_ohlcv['Close'].pct_change().dropna() * 100  # Convert to percentage
+    returns = df_ohlcv['Close'].pct_change(fill_method=None).dropna() * 100  # Convert to percentage
     
     # Define bins
     min_ret = returns.min()
@@ -778,7 +790,7 @@ def generate_slippage_samples(
             'expected': round(row['Close'], 2),
             'actual': round(row['Close'] * (1 + slippage/100), 2),
             'slippage': round(slippage, 3),
-            'volume': int(row['Volume'])
+            'volume': safe_int(row['Volume'])
         })
     
     return samples
@@ -797,7 +809,7 @@ def save_ticker_json(ticker: str, meta: Dict[str,Any],
             "High": float(row["High"]), 
             "Low": float(row["Low"]),
             "Close": float(row["Close"]), 
-            "Volume": int(row["Volume"]),
+            "Volume": safe_int(row["Volume"]),
             "amihud": float(row.get("amihud", 0.0)),
             "lambda": float(row.get("lambda", 0.0)),
             "mfc": float(row.get("mfc", 0.0)),
@@ -923,22 +935,53 @@ def run_pipeline_for_ticker(ticker: str, use_yf: bool = True):
 
 def batch_run(tickers_file: str, max_workers: int = 4):
     if not os.path.exists(tickers_file):
-        log.error("Tickers file not found: %s", tickers_file)
+        print(f"❌ Tickers file not found: {tickers_file}")
         return
         
     with open(tickers_file, "r") as f:
         tickers = [line.strip() for line in f if line.strip()]
-        
-    log.info("Batch processing %d tickers with %d workers", len(tickers), max_workers)
+    
+    start_time = time.time()
+    print(f"\n🚀 Processing {len(tickers)} stocks with {max_workers} workers...")
+    print(f"⏰ Started at: {datetime.now().strftime('%H:%M:%S')}\n")
+    
+    success_count = 0
+    error_count = 0
+    errors = []
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(run_pipeline_for_ticker, t): t for t in tickers}
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(tickers)):
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(tickers), 
+                          desc="Processing", unit="stock"):
             t = futures[future]
             try:
                 future.result()
+                success_count += 1
             except Exception as e:
-                log.error("Error processing %s: %s", t, e)
+                error_count += 1
+                errors.append((t, str(e)[:50]))
+    
+    elapsed = time.time() - start_time
+    minutes = int(elapsed // 60)
+    seconds = int(elapsed % 60)
+    
+    # Print summary
+    print(f"\n{'='*60}")
+    print(f"✅ BATCH PROCESSING COMPLETE")
+    print(f"{'='*60}")
+    print(f"✅ Success: {success_count}/{len(tickers)} stocks")
+    print(f"❌ Errors:  {error_count}/{len(tickers)} stocks")
+    print(f"⏱️  Time:    {minutes}m {seconds}s")
+    print(f"{'='*60}\n")
+    
+    if errors:
+        print(f"❌ Failed stocks:")
+        for ticker, err in errors[:10]:  # Show first 10 errors
+            print(f"   - {ticker}: {err}")
+        if len(errors) > 10:
+            print(f"   ... and {len(errors) - 10} more")
+        print()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
