@@ -979,9 +979,11 @@ def batch_run(tickers_file: str, max_workers: int = 4):
             try:
                 future.result()
                 success_count += 1
+                tqdm.write(f"✅ [SUCCESS] {t}")
             except Exception as e:
                 error_count += 1
                 errors.append((t, str(e)[:50]))
+                tqdm.write(f"❌ [FAILED] {t}: {str(e)[:50]}")
     
     elapsed = time.time() - start_time
     minutes = int(elapsed // 60)

@@ -33,6 +33,9 @@ jobs:
     - name: Train Slippage Forecasters
       run: python scripts/train_slippage_quantile.py
       
+    - name: Apply ML Predictions
+      run: python scripts/apply_models.py
+      
     - name: Commit Models
       run: |
         git config user.name "github-actions[bot]"

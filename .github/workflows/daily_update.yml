@@ -36,6 +36,9 @@ jobs:
     
     - name: Apply ML Predictions
       run: python scripts/apply_models.py
+
+    - name: Fetch Live Spot Prices
+      run: python scripts/fetch_spot_prices.py
       
     - name: Commit Data (triggers Cloudflare Pages deployment)
       run: |

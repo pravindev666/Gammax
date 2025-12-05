@@ -40,97 +40,156 @@ def save_data(ticker: str, df: pd.DataFrame):
     df.to_csv(csv_path)
     logger.info(f"Saved data for {ticker} to {csv_path}")
 
-def fetch_and_update_data(ticker: str, period: str = "5y", interval: str = "1d") -> pd.DataFrame:
+def fetch_and_update_data(ticker: str, period: str = "10y", interval: str = "1d") -> pd.DataFrame:
     """
-    Fetch data for ticker. 
-    If CSV exists, fetch only new data since last date and append.
-    If CSV doesn't exist, fetch full history (default 5y).
+    Fetch data for ticker.
+    1. If CSV exists:
+       - Update forward (append new days).
+       - Backfill backward (if data starts after 2005-01-01).
+    2. If CSV doesn't exist:
+       - Fetch full history from 2005-01-01.
     """
     csv_path = get_csv_path(ticker)
     existing_df = load_data(ticker)
     
+    # Target start date: 2005-01-01
+    TARGET_START = datetime(2005, 1, 1)
+    
+    # Defensive: Deduplicate existing data immediately
     if not existing_df.empty:
+        # Fix for "Open.1", "Close.1" corrupted columns from previous bad runs
+        # Keep only the standard columns
+        required_cols = ["Open", "High", "Low", "Close", "Volume"]
+        valid_cols = [c for c in existing_df.columns if c in required_cols]
+        existing_df = existing_df[valid_cols]
+        
+        existing_df = existing_df[~existing_df.index.duplicated(keep='last')]
+        # Ensure unique columns
+        existing_df = existing_df.loc[:, ~existing_df.columns.duplicated()]
+    
+    if not existing_df.empty:
+        # --- 1. Forward Update ---
         last_date = existing_df.index[-1]
-        # Ensure last_date is timezone-naive for comparison
+        # Ensure last_date is timezone-naive
         if hasattr(last_date, 'tzinfo') and last_date.tzinfo is not None:
             last_date = last_date.tz_convert(None)
             
         start_date = last_date + timedelta(days=1)
-        if start_date >= datetime.now():
-            logger.info(f"{ticker} is up to date (Last: {last_date.date()})")
-            return existing_df
+        
+        # Only fetch if there is a gap
+        if start_date < datetime.now() - timedelta(hours=12): # Simple check to avoid fetching if run same day
+            logger.info(f"Fetching update for {ticker} from {start_date.date()}")
+            try:
+                new_df = yf.download(ticker, start=start_date, interval=interval, progress=False, threads=False, auto_adjust=True)
+                if not new_df.empty:
+                    # Clean and standardize
+                    new_df = _clean_yfinance_df(new_df)
+                    
+                    if not new_df.empty:
+                        # Combine and deduplicate
+                        existing_df = pd.concat([existing_df, new_df])
+                        existing_df = existing_df[~existing_df.index.duplicated(keep='last')]
+                        existing_df = existing_df.sort_index()
+                        save_data(ticker, existing_df)
+            except Exception as e:
+                logger.error(f"Failed to update {ticker}: {e}")
+
+        # --- 2. Backward Backfill ---
+        first_date = existing_df.index[0]
+        if hasattr(first_date, 'tzinfo') and first_date.tzinfo is not None:
+            first_date = first_date.tz_convert(None)
             
-        logger.info(f"Fetching update for {ticker} from {start_date.date()}")
-        try:
-            new_df = yf.download(ticker, start=start_date, interval=interval, progress=False, threads=False)
-            if not new_df.empty:
-                # Handle MultiIndex columns from yfinance
-                if isinstance(new_df.columns, pd.MultiIndex):
-                    try:
-                        if 'Close' in new_df.columns.get_level_values(0):
-                            new_df.columns = new_df.columns.get_level_values(0)
-                        elif 'Close' in new_df.columns.get_level_values(1):
-                            new_df.columns = new_df.columns.get_level_values(1)
-                    except Exception:
-                        pass
-
-                # Standardize columns
-                required_cols = ["Open", "High", "Low", "Close", "Volume"]
-                available_cols = [c for c in required_cols if c in new_df.columns]
+        # If existing data starts significantly after 2005, try to backfill
+        if first_date > TARGET_START + timedelta(days=10):
+            logger.info(f"Attempting backfill for {ticker} (Current start: {first_date.date()}, Target: 2005)")
+            try:
+                # Fetch from 2005 up to the current first date
+                # yfinance 'end' is exclusive, so this fetches up to first_date-1
+                backfill_df = yf.download(ticker, start=TARGET_START, end=first_date, interval=interval, progress=False, threads=False, auto_adjust=True)
                 
-                if len(available_cols) < 5:
-                    return existing_df
+                if not backfill_df.empty:
+                    backfill_df = _clean_yfinance_df(backfill_df)
+                    
+                    if not backfill_df.empty:
+                        # Defensive: Deduplicate backfill data
+                        backfill_df = backfill_df[~backfill_df.index.duplicated(keep='last')]
+                        
+                        logger.info(f"Found {len(backfill_df)} older rows for {ticker}")
+                        
+                        # Concatenate
+                        existing_df = pd.concat([backfill_df, existing_df])
+                        
+                        # Final cleanup
+                        existing_df = existing_df[~existing_df.index.duplicated(keep='last')]
+                        existing_df = existing_df.sort_index()
+                        save_data(ticker, existing_df)
+            except Exception as e:
+                # Just log warning and continue with existing data
+                logger.warning(f"Backfill skipped for {ticker}: {e}")
 
-                new_df = new_df[available_cols]
-                if new_df.index.tz is not None:
-                    new_df.index = new_df.index.tz_convert(None)
-                
-                # Combine and deduplicate
-                combined_df = pd.concat([existing_df, new_df])
-                # Remove duplicates and reset index to ensure uniqueness
-                combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
-                combined_df = combined_df.sort_index()
-                # Reset and set index to ensure clean DatetimeIndex
-                combined_df.index = pd.DatetimeIndex(combined_df.index)
-                save_data(ticker, combined_df)
-                return combined_df
-        except Exception as e:
-            logger.error(f"Failed to update {ticker}: {e}")
-            return existing_df
+        return existing_df
     
-    # Full fetch if no data or update failed/empty
-    logger.info(f"Fetching full history ({period}) for {ticker}")
+    # --- 3. Full Fetch (New File) ---
+    logger.info(f"Fetching full history (from 2005) for {ticker}")
     try:
-        df = yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+        df = yf.download(ticker, start=TARGET_START, interval=interval, progress=False, threads=False, auto_adjust=True)
+        if df.empty:
+             raise ValueError("Empty data returned for specific start date")
+             
+        df = _clean_yfinance_df(df)
         if not df.empty:
-            # Handle MultiIndex columns from yfinance
-            if isinstance(df.columns, pd.MultiIndex):
-                try:
-                    # Try to get the level that contains OHLCV
-                    if 'Close' in df.columns.get_level_values(0):
-                        df.columns = df.columns.get_level_values(0)
-                    elif 'Close' in df.columns.get_level_values(1):
-                        df.columns = df.columns.get_level_values(1)
-                except Exception:
-                    pass
-
-            # Ensure columns exist
-            required_cols = ["Open", "High", "Low", "Close", "Volume"]
-            available_cols = [c for c in required_cols if c in df.columns]
-            
-            if len(available_cols) < 5:
-                logger.warning(f"Missing columns for {ticker}: {df.columns}")
-                return existing_df
-                
-            df = df[available_cols]
-            if df.index.tz is not None:
-                df.index = df.index.tz_convert(None)
             save_data(ticker, df)
             return df
+            
     except Exception as e:
-        logger.error(f"Failed to fetch initial data for {ticker}: {e}")
+        logger.warning(f"Could not fetch from 2005 for {ticker} ({e}). Falling back to period='max'...")
+        try:
+            # Fallback: Fetch max available history
+            df = yf.download(ticker, period="max", interval=interval, progress=False, threads=False, auto_adjust=True)
+            if not df.empty:
+                df = _clean_yfinance_df(df)
+                if not df.empty:
+                    save_data(ticker, df)
+                    return df
+        except Exception as e2:
+            logger.error(f"Failed to fetch initial data for {ticker}: {e2}")
     
     return existing_df
+
+def _clean_yfinance_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Helper to clean and standardize yfinance DataFrame"""
+    # Handle MultiIndex columns
+    if isinstance(df.columns, pd.MultiIndex):
+        try:
+            if 'Close' in df.columns.get_level_values(0):
+                df.columns = df.columns.get_level_values(0)
+            elif 'Close' in df.columns.get_level_values(1):
+                df.columns = df.columns.get_level_values(1)
+        except Exception:
+            pass
+
+    # Standardize columns
+    required_cols = ["Open", "High", "Low", "Close", "Volume"]
+    
+    # Defensive: Drop duplicate columns immediately
+    if df.columns.duplicated().any():
+        logger.warning(f"Duplicate columns detected: {df.columns[df.columns.duplicated()]}")
+        df = df.loc[:, ~df.columns.duplicated()]
+        logger.warning(f"Columns after deduplication: {df.columns}")
+    
+    available_cols = [c for c in required_cols if c in df.columns]
+    
+    if len(available_cols) < 5:
+        return pd.DataFrame()
+
+    df = df[available_cols]
+    if df.index.tz is not None:
+        df.index = df.index.tz_convert(None)
+    
+    # Defensive: Drop rows where Close is NaN (empty trading days)
+    df = df.dropna(subset=['Close'])
+    
+    return df
 
 if __name__ == "__main__":
     # Test with NIFTY

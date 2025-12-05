@@ -7,6 +7,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { VerdictTile } from "@/components/VerdictTile";
 import { NumericCard } from "@/components/NumericCard";
 import { HowToTile } from "@/components/HowToTile";
+import { OtherProductsTile } from "@/components/OtherProductsTile";
 import { Footer } from "@/components/Footer";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { DisclaimerModal, shouldShowDisclaimer } from "@/components/DisclaimerModal";
@@ -333,6 +334,10 @@ export default function Dashboard() {
 
             <div className="mt-4 sm:mt-6">
               <HowToTile onLearnMore={openExplain} />
+            </div>
+
+            <div className="mt-4 sm:mt-6">
+              <OtherProductsTile />
             </div>
           </main>
           <Footer />

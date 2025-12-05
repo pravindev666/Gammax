@@ -147,7 +147,11 @@ python scripts/fetch_spot_prices.py
 
 **What it does**:
 - Fetches OHLCV (Open, High, Low, Close, Volume) data using yfinance
-- Implements **incremental updates**: only fetches new data since last run
+- Fetches OHLCV (Open, High, Low, Close, Volume) data using yfinance
+- **Automatic History Management**:
+  - New tickers: Fetches from **2005-01-01** by default
+  - Existing data: Smartly appends new daily data (incremental update)
+  - Backfilling: Automatically detects and fills missing historical data (e.g., if current file starts in 2010, it fetches 2005-2010)
 - Saves data to CSV files in `public/data/raw/`
 - Handles yfinance's MultiIndex column structure
 - Provides timezone-aware date handling
