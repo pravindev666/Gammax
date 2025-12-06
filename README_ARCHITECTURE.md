@@ -481,24 +481,22 @@ Every chart tile footer shows:
 
 ## 🏢 **Production Deployment**
 
-### Replit Deployment
+### Cloudflare Pages Deployment
 ```bash
-# Just click "Run" in Replit
-npm run dev
-# Automatically handles everything:
-# - Synthetic data generation
-# - Express server on port 5000
-# - React hot reload on file changes
+# Automatic deployment via GitHub Actions
+# Push to main branch triggers Cloudflare Pages build
+git push origin main
+# Dashboard available at: https://tradyxa-betax.pages.dev
 ```
 
-### Self-Hosted (Linux/Mac)
+### Self-Hosted (Linux/Mac/Windows)
 ```bash
 # 1. Install dependencies
 npm install
 pip install -r requirements.txt
 
 # 2. Generate data (optional)
-python3 scripts/tradyxa_pipeline.py --all
+python scripts/tradyxa_pipeline.py --mode batch_run --tickers-file scripts/nifty500.txt
 
 # 3. Start server
 npm run dev
@@ -565,8 +563,8 @@ Tradyxa Aztryx/
 ## 🚀 **Quick Start**
 
 ```bash
-# Clone / Open in Replit
-git clone <repo>
+# Clone repository
+git clone https://github.com/pravindev666/Gammax.git
 cd "Tradyxa Aztryx"
 
 # Install
