@@ -36,8 +36,9 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add public/data/live/spot_prices.json
+        # Add ALL changes to prevent unstaged changes error
+        git add -A
         git diff --quiet && git diff --staged --quiet || git commit -m "chore: live spot prices update [deploy]"
-        git fetch origin main
-        git rebase origin/main || git rebase --abort
+        # Pull with merge strategy (safer than rebase)
+        git pull origin main --no-rebase --allow-unrelated-histories || true
         git push origin main

@@ -46,9 +46,9 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        # Commit updated JSONs and CSVs
-        git add public/data/ticker/*.json public/data/raw/*.csv
+        # Add ALL generated files to prevent unstaged changes error
+        git add -A
         git commit -m "chore: market data update $(date -u '+%Y-%m-%d %H:%M UTC') [deploy]" || echo "No changes"
-        git fetch origin main
-        git rebase origin/main || git rebase --abort
+        # Pull with merge strategy (safer than rebase)
+        git pull origin main --no-rebase --allow-unrelated-histories || true
         git push origin main

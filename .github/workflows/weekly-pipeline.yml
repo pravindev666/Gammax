@@ -107,14 +107,12 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          git add public/data/ticker/*.json
-          git add public/data/raw/*.csv
-          git add public/data/live/spot_prices.json
-          git add models/
+          # Add ALL generated files to prevent unstaged changes error
+          git add -A
           git diff --quiet && git diff --staged --quiet || \
             git commit -m "📊 Weekly data pipeline update [skip ci]"
-          git fetch origin main
-          git rebase origin/main || git rebase --abort
+          # Pull with merge strategy (safer than rebase for automated workflows)
+          git pull origin main --no-rebase --allow-unrelated-histories || true
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
