@@ -1,0 +1,94 @@
+name: Initial Setup (Run Once)
+
+# This workflow should be run ONCE manually to generate all 503 CSVs
+# After that, daily_update.yml will append new data incrementally
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  initial-setup:
+    name: Generate all CSVs from 2005 + Train Models
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Fetch tickers list
+        run: python scripts/fetch_tickers.py
+      
+      # STEP 1: Generate all 503 CSVs from 2005
+      - name: Fetch all 503 stocks (from 2005 to today)
+        run: |
+          echo "📊 Fetching historical data for 503 tickers from 2005..."
+          python scripts/tradyxa_pipeline.py \
+            --mode batch_run \
+            --tickers-file scripts/nifty500.txt \
+            --max-workers 4 \
+            --use-yf
+        timeout-minutes: 50
+      
+      # STEP 2: Train ML models on the fresh data
+      - name: Train regime classification model
+        run: python scripts/train_regime_classifier.py
+      
+      - name: Train slippage forecasting models
+        run: python scripts/train_slippage_quantile.py
+      
+      # STEP 3: Apply predictions to all JSONs
+      - name: Apply ML predictions to all stocks
+        run: python scripts/apply_models.py
+      
+      # STEP 4: Fetch live spot prices
+      - name: Fetch live spot prices
+        run: python scripts/fetch_spot_prices.py
+      
+      # STEP 5: Commit everything
+      - name: Commit and push all data
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          # Add ALL generated files (CSVs, JSONs, models)
+          git add -A
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🚀 Initial setup: 503 CSVs + trained models [skip ci]"
+            
+            # Pull latest and push
+            git pull origin main --no-rebase --allow-unrelated-histories || true
+            git push origin main
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        run: |
+          echo "✅ Initial setup completed!"
+          echo "📊 Generated 503 stock CSVs from 2005"
+          echo "🤖 Trained ML models"
+          echo "💾 Everything committed to repo"
+          echo ""
+          echo "⏭️ Next steps:"
+          echo "   - Daily updates will now append new OHLCV automatically"
+          echo "   - Weekly training will retrain models"
+          echo "   - Live prices update every 2 hours"

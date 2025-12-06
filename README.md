@@ -139,12 +139,16 @@ Calculated based on:
 
 ```mermaid
 flowchart TB
+    subgraph Initial["🚀 INITIAL SETUP (Run Once Manually)"]
+        I1[Fetch 503 CSVs from 2005] --> I2[Train ML Models]
+        I2 --> I3[Generate JSONs]
+        I3 --> I4[Git Push All]
+    end
+    
     subgraph Weekly["📅 WEEKLY (Sunday 2 AM IST)"]
-        W1[Fetch 503 tickers from 2005] --> W2[Train Regime Classifier]
-        W2 --> W3[Train Slippage Models]
-        W3 --> W4[Apply ML Predictions]
-        W4 --> W5[Fetch Live Prices]
-        W5 --> W6[Git Push All]
+        W1[Train Regime Classifier] --> W2[Train Slippage Models]
+        W2 --> W3[Apply Predictions]
+        W3 --> W4[Git Push]
     end
     
     subgraph Daily["📆 DAILY (Mon-Fri 3:45 PM IST)"]
@@ -159,8 +163,10 @@ flowchart TB
         L2 --> L3[Git Push]
     end
     
-    Weekly --> CF[Cloudflare Pages Deploy]
-    Daily --> CF
+    Initial --> Daily
+    Daily --> Weekly
+    Weekly --> Daily
+    Daily --> CF[Cloudflare Pages Deploy]
     Live --> CF
 ```
 
@@ -168,49 +174,43 @@ flowchart TB
 
 | File | Schedule | Purpose |
 |------|----------|---------|
-| `weekly-pipeline.yml` | Sunday 2:00 AM IST | Full fetch + train models |
+| `initial-setup.yml` | **Manual (once)** | Generate 503 CSVs from 2005 + train |
+| `weekly-pipeline.yml` | Sunday 2:00 AM IST | Retrain ML models only |
 | `daily_update.yml` | Mon-Fri 3:45 PM IST | Append OHLCV + predictions |
 | `live_spot_prices.yml` | Every 2 hours (market) | Update live prices only |
 
-#### Python Scripts Used
+#### The Logic Flow
 
-```mermaid
-sequenceDiagram
-    participant GHA as GitHub Actions
-    participant DM as data_manager.py
-    participant TP as tradyxa_pipeline.py
-    participant TR as train_*.py
-    participant AM as apply_models.py
-    participant SP as fetch_spot_prices.py
-    
-    Note over GHA: Weekly Pipeline
-    GHA->>DM: Fetch/Update CSVs
-    DM-->>GHA: 503 CSVs (2005-today)
-    GHA->>TP: Generate JSONs
-    GHA->>TR: Train ML models
-    GHA->>AM: Apply predictions
-    GHA->>SP: Fetch live prices
-    
-    Note over GHA: Daily Pipeline
-    GHA->>DM: Append today's OHLCV
-    GHA->>TP: Regenerate JSONs
-    GHA->>AM: Apply predictions
-    GHA->>SP: Fetch live prices
-    
-    Note over GHA: Live Pipeline
-    GHA->>SP: Only fetch live prices
-```
+1. **Initial Setup (Run Once):**
+   - Fetches all 503 tickers from 2005 → Creates CSVs
+   - Trains ML models → Saves `.joblib` files
+   - This is your **one-time bootstrap**
+
+2. **Daily Update (Mon-Fri):**
+   - `data_manager.py` checks CSV → Only fetches NEW days
+   - Appends today's OHLCV to existing CSV
+   - Regenerates JSONs with fresh data
+
+3. **Weekly Training (Sunday):**
+   - Uses existing CSVs (already updated by daily)
+   - Retrains models on latest data patterns
+   - Applies fresh predictions
+
+4. **Live Prices (Intraday):**
+   - Lightweight: just fetches NIFTY, BANKNIFTY, VIX
+   - Updates `spot_prices.json` for dashboard
 
 #### Cost Estimate (Private Repo - FREE!)
 
 | Workflow | Runs/Month | Time/Run | Total Mins |
 |----------|------------|----------|------------|
-| Weekly Full Pipeline | 4 | 45 min | **180 min** |
+| Initial Setup | 1 (once) | 50 min | **50 min** |
+| Weekly Training | 4 | 15 min | **60 min** |
 | Daily Update | 22 | 3 min | **66 min** |
 | Live Spot (4x/day) | 88 | 1 min | **88 min** |
-| **TOTAL** | 114 | - | **334 min** |
+| **TOTAL** | 115 | - | **264 min** |
 
-**GitHub Free Tier:** 2,000 mins/month → Using only **17%** ✅
+**GitHub Free Tier:** 2,000 mins/month → Using only **13%** ✅
 
 **Cloudflare Pages:** 500 builds/month → Using ~30 builds → **6%** ✅
 
